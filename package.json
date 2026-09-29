@@ -1,0 +1,118 @@
+{
+  "name": "cp-debugger",
+  "displayName": "Competitive Debugger",
+  "description": "LLM-free competitive programming debugger for C++: GCC-first execution, debug-print instrumentation, sanitizer probing and source diagnostics.",
+  "version": "0.2.1",
+  "publisher": "cp-debugger-local",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/REPLACE_WITH_YOUR_GITHUB_USERNAME/cp-debugger.git"
+  },
+  "engines": {
+    "vscode": ">=1.85.0"
+  },
+  "categories": [
+    "Other",
+    "Debuggers",
+    "Programming Languages"
+  ],
+  "activationEvents": [
+    "onLanguage:cpp"
+  ],
+  "main": "./extension.js",
+  "scripts": {
+    "package": "vsce package",
+    "test": "node test/smoke.js"
+  },
+  "devDependencies": {
+    "@vscode/vsce": "^3.6.0"
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "cpDebugger.debugPrint",
+        "title": "CP Debugger: Debug Print"
+      },
+      {
+        "command": "cpDebugger.removeDebug",
+        "title": "CP Debugger: Remove Generated Debug Code"
+      },
+      {
+        "command": "cpDebugger.diagnose",
+        "title": "CP Debugger: Diagnose (GCC-first)"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "cpDebugger.debugPrint",
+        "key": "ctrl+alt+d",
+        "when": "editorLangId == cpp"
+      },
+      {
+        "command": "cpDebugger.removeDebug",
+        "key": "ctrl+alt+c",
+        "when": "editorLangId == cpp"
+      },
+      {
+        "command": "cpDebugger.diagnose",
+        "key": "ctrl+alt+r",
+        "when": "editorLangId == cpp"
+      }
+    ],
+    "configuration": {
+      "title": "CP Debugger",
+      "properties": {
+        "cpDebugger.compiler": {
+          "type": "string",
+          "default": "auto",
+          "description": "Exact g++ executable. The extension never changes to clang++ automatically."
+        },
+        "cpDebugger.cxxStandard": {
+          "type": "string",
+          "default": "gnu++23",
+          "description": "C++ standard passed to g++."
+        },
+        "cpDebugger.repositoryUrl": {
+          "type": "string",
+          "default": "",
+          "description": "Optional GitHub repository URL. Empty means use the local Git remote when it points to github.com."
+        },
+        "cpDebugger.timeoutMs": {
+          "type": "integer",
+          "default": 5000,
+          "minimum": 100,
+          "maximum": 120000,
+          "description": "Maximum program execution time in milliseconds."
+        },
+        "cpDebugger.inputFile": {
+          "type": "string",
+          "default": "",
+          "description": "Optional input file. Empty means <source>.in when it exists."
+        },
+        "cpDebugger.enableSanitizers": {
+          "type": "boolean",
+          "default": true,
+          "description": "Probe the configured GCC for working AddressSanitizer + UndefinedBehaviorSanitizer. Never switches compiler."
+        },
+        "cpDebugger.debugMode": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "sanitizer",
+            "libstdc++-debug",
+            "plain"
+          ],
+          "enumDescriptions": [
+            "Use GCC sanitizers only when an actual compile+link+launch probe succeeds; otherwise use libstdc++ debug mode.",
+            "Require GCC ASan + UBSan to pass the actual probe; never fall back.",
+            "Use _GLIBCXX_DEBUG and _GLIBCXX_ASSERTIONS.",
+            "Use normal GCC compilation with debug symbols."
+          ],
+          "default": "auto",
+          "description": "Debug build mode. The configured g++ is always used."
+        }
+      }
+    }
+  }
+}
