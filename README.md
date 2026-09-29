@@ -2,7 +2,7 @@
 
 LLMを使わず、ローカルのGCCと決定論的なソース変換・実行時チェックだけで競プロのデバッグを支援するVS Code拡張です。
 
-## 0.2.2
+## 0.2.3
 
 今回の重要な修正は、**GCCのSanitizer対応判定を `-print-file-name` だけで判断しない**ことです。
 実際に小さなC++プログラムを `g++ -fsanitize=address,undefined` でコンパイル・リンクし、さらに起動できることまで確認してからSanitizerを有効化します。
@@ -75,7 +75,7 @@ Git repository
    └─ install-release.ps1
 ```
 
-バージョンを `package.json` で上げて、例えば `v0.2.2` のGit tagを打つとGitHub ActionsでVSIXを作る構成にしています。
+バージョンを `package.json` で上げて、例えば `v0.2.3` のGit tagを打つとGitHub ActionsでVSIXを作る構成にしています。
 
 同じ `publisher + name` を維持すれば、VSIXをインストールしても別の拡張として増殖させず、既存拡張の更新として扱えます。VS Code CLIはVSIXの指定を「install or update」として提供しています。
 
@@ -97,9 +97,9 @@ VS Codeから `F5` でExtension Development Hostを起動できます。
 
 ### GitHub Actions / VSIX
 
-このリポジトリは `package-lock.json` を必須にしません。VSIXの生成だけに `@vscode/vsce` の固定バージョンを `npx` で使用します。GitHub Actionsでもnpmキャッシュを無効にしているため、lockfile不足で止まりません。
+このリポジトリは `package-lock.json` を必須にしません。VSIXの生成だけに `@vscode/vsce` の固定バージョンを `npx` で使用します。GitHub Actionsではnpmキャッシュを無効にしているため、lockfile不足で止まりません。スモークテストは固定バージョンをハードコードせず、GitHub Actionsでは `GITHUB_REF_NAME` と `package.json` を比較します。
 
-リリースは `package.json` の `version` とGit tagを一致させて作ります。例えば `0.2.2` に更新したら:
+リリースは `package.json` の `version` とGit tagを一致させて作ります。例えば `0.2.3` に更新したら:
 
 ```bash
 git add .
