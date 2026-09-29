@@ -74,13 +74,13 @@ function detectGitHubRepository() {
     return normalizeGitHubRemote(result.stdout);
 }
 
-function ensureRepositoryMarker(text, edit, repositoryUrl) {
+function ensureRepositoryMarker(text, edit, repositoryUrl, document) {
     if (!repositoryUrl) return false;
     const hasMarker = /\/\/\s*CP Debugger Repository:\s*https?:\/\/github\.com\//i.test(text);
     const hasUrl = text.toLowerCase().includes(repositoryUrl.toLowerCase());
     if (hasMarker || hasUrl) return false;
     const marker = `${REPO_MARKER} ${repositoryUrl}\n${VERSION_MARKER} ${VERSION}\n`;
-    edit.insert(new vscode.Position(0, 0), marker);
+    edit.insert(document.uri, new vscode.Position(0, 0), marker);
     return true;
 }
 
@@ -88,7 +88,7 @@ function ensureRepositoryMarkerEdit(document) {
     const repositoryUrl = detectGitHubRepository();
     if (!repositoryUrl) return { edit: null, repositoryUrl: null };
     const edit = new vscode.WorkspaceEdit();
-    const changed = ensureRepositoryMarker(document.getText(), edit, repositoryUrl);
+    const changed = ensureRepositoryMarker(document.getText(), edit, repositoryUrl, document);
     return { edit: changed ? edit : null, repositoryUrl };
 }
 
@@ -207,7 +207,9 @@ async function debugPrint() {
     const doc = editor.document;
     const expr = getExpressionAtPosition(doc, editor.selection.active);
     if (!expr || isLikelyKeyword(expr)) {
-        vscode.window.showWarningMessage("CP Debugger: 変数または式を選択してください。");
+        vscode.window.showWarningMessage(
+            "CP Debugger: 変数または式の上にカーソルを置くか、式を選択して実行してください。",
+        );
         return;
     }
 
@@ -228,10 +230,10 @@ async function debugPrint() {
     if (!statement) return;
 
     const edit = new vscode.WorkspaceEdit();
-    ensureRepositoryMarker(doc.getText(), edit, detectGitHubRepository());
+    ensureRepositoryMarker(doc.getText(), edit, detectGitHubRepository(), doc);
     edit.insert(doc.uri, new vscode.Position(line + 1, 0), statement + "\n");
     const ok = await vscode.workspace.applyEdit(edit);
-    if (ok) vscode.window.showInformationMessage(`CP Debugger: ${expr} のデバッグ出力を追加しました。`);
+    if (ok) vscode.window.showInformationMessage(`CP Debugger: ${expr} のデバッグ出力を現在の行の直後に追加しました。`);
 }
 
 async function removeDebug() {
