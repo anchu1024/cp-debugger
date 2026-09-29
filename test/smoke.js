@@ -49,6 +49,111 @@ const incrementRead = analyzeStaticCpp("int main() { int n; n++; n++; }").diagno
 if (incrementRead.length !== 1 || incrementRead[0].rule !== "CP001") {
     throw new Error("CP001 did not deduplicate an uninitialized increment read");
 }
+const inclusiveBounds = analyzeStaticCpp(`
+int main() {
+  int n = 5;
+  vector<int> values(n);
+  for (int i = 0; i <= n; ++i) { cout << values[i]; }
+}`).diagnostics;
+if (!inclusiveBounds.some((diagnostic) => diagnostic.rule === "CP002")) {
+    throw new Error("CP002 did not report a proven inclusive-loop boundary access");
+}
+const exclusiveBounds = analyzeStaticCpp(`
+int main() {
+  int n = 5;
+  vector<int> values(n);
+  for (int i = 0; i < n; ++i) { cout << values[i]; }
+}`).diagnostics;
+if (exclusiveBounds.some((diagnostic) => diagnostic.rule === "CP002")) {
+    throw new Error("CP002 reported an exclusive-loop access as out of bounds");
+}
+const directBounds = analyzeStaticCpp("int main() { int values[3]; cout << values[3] << values[-1]; }").diagnostics;
+if (directBounds.filter((diagnostic) => diagnostic.rule === "CP002").length !== 2) {
+    throw new Error("CP002 did not detect statically known and negative indices");
+}
+const shadowedBounds = analyzeStaticCpp(
+    "int main() { vector<int> a(2); cout << a[1]; { vector<int> a(1); cout << a[1]; } }",
+).diagnostics.filter((diagnostic) => diagnostic.rule === "CP002");
+if (shadowedBounds.length !== 1) {
+    throw new Error("CP002 did not resolve same-named containers by scope");
+}
+const guardedBounds = analyzeStaticCpp(
+    "int main() { int n=5; vector<int> a(n); for(int i=0;i<=n;++i) { if(i<n) cout << a[i]; } }",
+).diagnostics.filter((diagnostic) => diagnostic.rule === "CP002");
+if (guardedBounds.length) {
+    throw new Error("CP002 reported an access guarded by the matching strict bound");
+}
+const arrayBounds = analyzeStaticCpp("int main() { std::array<int, 3> values{}; cout << values[3]; }").diagnostics;
+if (arrayBounds.filter((diagnostic) => diagnostic.rule === "CP002").length !== 1) {
+    throw new Error("CP002 did not use the fixed size of std::array");
+}
+if (
+    analyzeStaticCpp("int main() { map<int, int> values; cout << values[-1]; }").diagnostics.some(
+        (d) => d.rule === "CP002",
+    )
+) {
+    throw new Error("CP002 treated a map key as an array index");
+}
+const unsortedSearch = (code) => analyzeStaticCpp(code).diagnostics.filter((diagnostic) => diagnostic.rule === "CP003");
+if (!unsortedSearch("int main() { vector<int> a; lower_bound(a.begin(), a.end(), 4); }").length) {
+    throw new Error("CP003 did not warn for a container not known to be sorted");
+}
+if (
+    unsortedSearch("int main() { vector<int> a; sort(a.begin(), a.end()); lower_bound(a.begin(), a.end(), 4); }").length
+) {
+    throw new Error("CP003 warned after sorting the searched container");
+}
+if (
+    !unsortedSearch("int main() { vector<int> a, b; sort(b.begin(), b.end()); lower_bound(a.begin(), a.end(), 4); }")
+        .length
+) {
+    throw new Error("CP003 confused the sorted container with the search container");
+}
+if (
+    !unsortedSearch(
+        "int main() { vector<int> a; sort(a.begin(),a.end()); { vector<int> a; lower_bound(a.begin(),a.end(),0); } }",
+    ).length
+) {
+    throw new Error("CP003 reused sorted state for a shadowed container");
+}
+if (
+    !unsortedSearch(
+        "int main() { vector<int> a; sort(a.begin(), a.end()); a.push_back(4); lower_bound(a.begin(), a.end(), 4); }",
+    ).length
+) {
+    throw new Error("CP003 did not invalidate sorted state after push_back");
+}
+if (unsortedSearch("int main() { vector<int> a; ranges::sort(a); lower_bound(a.begin(), a.end(), 4); }").length) {
+    throw new Error("CP003 did not recognize ranges::sort");
+}
+if (
+    !unsortedSearch(
+        "int main() { vector<int> a; sort(a.begin(), a.end()); reverse(a.begin(), a.end()); lower_bound(a.begin(), a.end(), 4); }",
+    ).length
+) {
+    throw new Error("CP003 did not invalidate sorted state after reverse");
+}
+if (
+    !unsortedSearch(
+        "int main() { vector<int> a; if(flag) { sort(a.begin(),a.end()); } lower_bound(a.begin(),a.end(),0); }",
+    ).length
+) {
+    throw new Error("CP003 treated a conditional sort as an unconditional guarantee");
+}
+if (
+    unsortedSearch(
+        "int main() { vector<int> a; if(flag) { sort(a.begin(),a.end()); lower_bound(a.begin(),a.end(),0); } }",
+    ).length
+) {
+    throw new Error("CP003 lost a sort guarantee within the same branch");
+}
+if (
+    !unsortedSearch(
+        "int main() { vector<int> a; sort(a.begin(),a.end(),greater<int>()); lower_bound(a.begin(),a.end(),0); }",
+    ).length
+) {
+    throw new Error("CP003 treated a custom comparator as default ascending order");
+}
 const helper = debugHelperSource();
 if (
     !source.includes("cpdbg::print") ||
