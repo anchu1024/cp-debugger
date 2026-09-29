@@ -2,7 +2,7 @@
 
 LLMを使わず、ローカルのGCCと決定論的なソース変換・実行時チェックだけで競プロのデバッグを支援するVS Code拡張です。
 
-## 0.2.1
+## 0.2.2
 
 今回の重要な修正は、**GCCのSanitizer対応判定を `-print-file-name` だけで判断しない**ことです。
 実際に小さなC++プログラムを `g++ -fsanitize=address,undefined` でコンパイル・リンクし、さらに起動できることまで確認してからSanitizerを有効化します。
@@ -55,7 +55,7 @@ main.in
 
 ```cpp
 // CP Debugger Repository: https://github.com/...
-// CP Debugger Version: 0.2.1
+// CP Debugger Version: 0.2.2
 ```
 
 このリンクは「非AIであることの数学的/法的証明」ではなく、**使用したツールの実装を公開して透明性を高めるためのマーカー**です。
@@ -75,12 +75,12 @@ Git repository
    └─ install-release.ps1
 ```
 
-バージョンを `package.json` で上げて、例えば `v0.2.1` のGit tagを打つとGitHub ActionsでVSIXを作る構成にしています。
+バージョンを `package.json` で上げて、例えば `v0.2.2` のGit tagを打つとGitHub ActionsでVSIXを作る構成にしています。
 
 同じ `publisher + name` を維持すれば、VSIXをインストールしても別の拡張として増殖させず、既存拡張の更新として扱えます。VS Code CLIはVSIXの指定を「install or update」として提供しています。
 
 ```powershell
-code --install-extension .\cp-debugger-0.2.1.vsix --force
+code --install-extension .\cp-debugger-0.2.2.vsix --force
 ```
 
 VSIXから入れた拡張は自動更新が既定で無効なので、GitHub Releaseから更新する場合はこのコマンド、または `tools/install-release.ps1` を使います。
@@ -94,3 +94,19 @@ npm run package
 ```
 
 VS Codeから `F5` でExtension Development Hostを起動できます。
+
+### GitHub Actions / VSIX
+
+このリポジトリは `package-lock.json` を必須にしません。VSIXの生成だけに `@vscode/vsce` の固定バージョンを `npx` で使用します。GitHub Actionsでもnpmキャッシュを無効にしているため、lockfile不足で止まりません。
+
+リリースは `package.json` の `version` とGit tagを一致させて作ります。例えば `0.2.2` に更新したら:
+
+```bash
+git add .
+git commit -m "Release 0.2.2"
+git tag v0.2.2
+git push origin main
+git push origin v0.2.2
+```
+
+GitHub ActionsがVSIXを作ってGitHub Releaseへ添付します。VSIX自体はGit管理しません。 `.gitignore` の `*.vsix` で除外しています。
