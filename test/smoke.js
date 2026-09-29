@@ -26,7 +26,7 @@ for (const marker of ["CPDBG-BEGIN", "CPDBG-END", "-fsanitize=address,undefined"
     if (!source.includes(marker)) throw new Error(`missing marker: ${marker}`);
 }
 
-if (/edit\.insert\(new vscode\.Position/.test(extensionSource)) {
+if (/edit\.insert\(new vscode\.Position/.test(source)) {
     throw new Error("invalid WorkspaceEdit.insert signature remains");
 }
 
