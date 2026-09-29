@@ -2,7 +2,9 @@
 
 LLMを使わず、ローカルのGCCと決定論的なソース変換・実行時チェックだけで競プロのデバッグを支援するVS Code拡張です。
 
-## 0.2.3
+[最新リリース](https://github.com/anchu1024/cp-debugger/releases/tag/v0.2.6)の使用が推奨されています。
+
+## 0.2.6
 
 今回の重要な修正は、**GCCのSanitizer対応判定を `-print-file-name` だけで判断しない**ことです。
 実際に小さなC++プログラムを `g++ -fsanitize=address,undefined` でコンパイル・リンクし、さらに起動できることまで確認してからSanitizerを有効化します。
