@@ -3,6 +3,8 @@ const cp = require("child_process");
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
+const { analyzeStaticCpp } = require("./lib/cpp-analysis");
+const { debugHelperSource } = require("./lib/cpp-debug-helper");
 
 const PACKAGE = require("./package.json");
 const DIAG_SOURCE = "CP Debugger";
@@ -76,9 +78,10 @@ function detectGitHubRepository() {
 
 function ensureRepositoryMarker(text, edit, repositoryUrl, document) {
     if (!repositoryUrl) return false;
-    const hasMarker = /\/\/\s*CP Debugger Repository:\s*https?:\/\/github\.com\//i.test(text);
-    const hasUrl = text.toLowerCase().includes(repositoryUrl.toLowerCase());
-    if (hasMarker || hasUrl) return false;
+    const hasMarker = text
+        .split(/\r?\n/)
+        .some((line) => /^\s*\/\/\s*CP Debugger Repository:\s*https?:\/\/github\.com\//i.test(line));
+    if (hasMarker) return false;
     const marker = `${REPO_MARKER} ${repositoryUrl}\n${VERSION_MARKER} ${VERSION}\n`;
     edit.insert(document.uri, new vscode.Position(0, 0), marker);
     return true;
@@ -159,46 +162,25 @@ function isLikelyKeyword(expr) {
     ]).has(expr);
 }
 
-function inferKind(document, lineNumber, expr) {
-    const text = document.getText();
-    const before = text.slice(
-        0,
-        document.offsetAt(new vscode.Position(lineNumber, document.lineAt(lineNumber).text.length)),
-    );
-    const declRe = new RegExp(
-        "(?:^|[;{}\\n])\\s*(?:const\\s+)?(?:std::)?(vector|array|deque|list|set|multiset|unordered_set|map|multimap|unordered_map|pair|string|queue|stack|priority_queue)\\s*<[^;\\n]+>\\s+([A-Za-z_][A-Za-z0-9_]*)",
-        "g",
-    );
-    let d;
-    let kind = null;
-    while ((d = declRe.exec(before)) !== null) {
-        if (d[2] === expr) kind = d[1];
-    }
-    if (kind) return kind;
-    return "scalar";
-}
-
 function escapeCppString(s) {
     return s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
 
-function makeDebugStatement(expr, kind, indent) {
+function makeDebugStatement(expr, indent) {
     if (!expr) return null;
-    const prefix = `${indent}${DBG_BEGIN} ${expr}\n`;
-    const suffix = `\n${indent}${DBG_END}`;
-    if (kind === "pair") {
-        return `${prefix}${indent}cerr << "[CPDBG] ${escapeCppString(expr)} = (" << (${expr}).first << ", " << (${expr}).second << ")\\n";${suffix}`;
+    return `${indent}${DBG_BEGIN} ${expr}\n${indent}cpdbg::print("${escapeCppString(expr)}", (${expr}));\n${indent}${DBG_END}`;
+}
+
+function buildPreamble(text, repositoryUrl) {
+    let preamble = "";
+    if (
+        repositoryUrl &&
+        !text.split(/\r?\n/).some((line) => /^\s*\/\/\s*CP Debugger Repository:\s*https?:\/\/github\.com\//i.test(line))
+    ) {
+        preamble += `${REPO_MARKER} ${repositoryUrl}\n${VERSION_MARKER} ${VERSION}\n`;
     }
-    if (["vector", "array", "deque", "list", "set", "multiset", "unordered_set"].includes(kind)) {
-        return `${prefix}${indent}cerr << "[CPDBG] ${escapeCppString(expr)} = ["; { bool __cpdbg_first = true; for (const auto& __cpdbg_v : (${expr})) { if (!__cpdbg_first) cerr << ", "; __cpdbg_first = false; cerr << __cpdbg_v; } } cerr << "]\\n";${suffix}`;
-    }
-    if (["map", "multimap", "unordered_map"].includes(kind)) {
-        return `${prefix}${indent}cerr << "[CPDBG] ${escapeCppString(expr)} = {"; { bool __cpdbg_first = true; for (const auto& __cpdbg_v : (${expr})) { if (!__cpdbg_first) cerr << ", "; __cpdbg_first = false; cerr << "(" << __cpdbg_v.first << ": " << __cpdbg_v.second << ")"; } } cerr << "}\\n";${suffix}`;
-    }
-    if (["queue", "stack", "priority_queue"].includes(kind)) {
-        return `${prefix}${indent}cerr << "[CPDBG] ${escapeCppString(expr)}: container size = " << (${expr}).size() << '\\n';${suffix}`;
-    }
-    return `${prefix}${indent}cerr << "[CPDBG] ${escapeCppString(expr)} = " << (${expr}) << '\\n';${suffix}`;
+    if (!text.includes(`${DBG_BEGIN} HELPERS`)) preamble += debugHelperSource();
+    return preamble;
 }
 
 async function debugPrint() {
@@ -225,12 +207,12 @@ async function debugPrint() {
         return;
     }
 
-    const kind = inferKind(doc, line, expr);
-    const statement = makeDebugStatement(expr, kind, indent);
+    const statement = makeDebugStatement(expr, indent);
     if (!statement) return;
 
     const edit = new vscode.WorkspaceEdit();
-    ensureRepositoryMarker(doc.getText(), edit, detectGitHubRepository(), doc);
+    const preamble = buildPreamble(doc.getText(), detectGitHubRepository());
+    if (preamble) edit.insert(doc.uri, new vscode.Position(0, 0), preamble);
     edit.insert(doc.uri, new vscode.Position(line + 1, 0), statement + "\n");
     const ok = await vscode.workspace.applyEdit(edit);
     if (ok) vscode.window.showInformationMessage(`CP Debugger: ${expr} のデバッグ出力を現在の行の直後に追加しました。`);
@@ -309,44 +291,47 @@ function probeSanitizers(compiler, standard) {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "cp-debugger-probe-"));
     const source = path.join(tempDir, "probe.cpp");
     const exe = path.join(tempDir, process.platform === "win32" ? "probe.exe" : "probe");
-    fs.writeFileSync(source, "int main() { return 0; }\n", "utf8");
-
-    const args = [
-        `-${standard}`,
-        "-g",
-        "-O0",
-        "-fno-omit-frame-pointer",
-        "-fsanitize=address,undefined",
-        source,
-        "-o",
-        exe,
-    ];
-    const result = commandOutput(compiler, args);
-    let works = result.status === 0 && fs.existsSync(exe);
-    let launchError = "";
-
-    if (works) {
-        const run = cp.spawnSync(exe, [], {
-            cwd: tempDir,
-            encoding: "utf8",
-            windowsHide: true,
-            timeout: 2000,
-        });
-        if (run.error || run.status !== 0) {
-            works = false;
-            launchError = (run.stderr || run.stdout || run.error?.message || "").trim();
-        }
-    }
-
-    const info = {
-        available: works,
-        compileOutput: `${result.stdout || ""}${result.stderr || ""}`.trim(),
-        launchError,
-    };
-    sanitizerProbeCache.set(cacheKey, info);
+    let info;
     try {
-        fs.rmSync(tempDir, { recursive: true, force: true });
-    } catch (_) {}
+        fs.writeFileSync(source, "int main() { return 0; }\n", "utf8");
+        const args = [
+            `-${standard}`,
+            "-g",
+            "-O0",
+            "-fno-omit-frame-pointer",
+            "-fsanitize=address,undefined",
+            source,
+            "-o",
+            exe,
+        ];
+        const result = commandOutput(compiler, args);
+        let works = result.status === 0 && fs.existsSync(exe);
+        let launchError = "";
+        if (works) {
+            const run = cp.spawnSync(exe, [], {
+                cwd: tempDir,
+                encoding: "utf8",
+                windowsHide: true,
+                timeout: 2000,
+            });
+            if (run.error || run.status !== 0) {
+                works = false;
+                launchError = (run.stderr || run.stdout || run.error?.message || "").trim();
+            }
+        }
+        info = {
+            available: works,
+            compileOutput: `${result.stdout || ""}${result.stderr || ""}`.trim(),
+            launchError,
+        };
+    } catch (error) {
+        info = { available: false, compileOutput: "", launchError: error.message };
+    } finally {
+        try {
+            fs.rmSync(tempDir, { recursive: true, force: true });
+        } catch (_) {}
+    }
+    sanitizerProbeCache.set(cacheKey, info);
     return info;
 }
 
@@ -355,6 +340,15 @@ function buildPlan(source, output, compiler) {
     const mode = config().get("debugMode", "auto");
     const enableSan = config().get("enableSanitizers", true);
     const args = [`-${standard}`, "-g", "-O0", source, "-o", output];
+
+    if (mode === "sanitizer" && !enableSan) {
+        return {
+            args: null,
+            modeUsed: "sanitizer",
+            sanitizer: false,
+            error: "cpDebugger.enableSanitizers が無効なため、Sanitizerを要求できません。",
+        };
+    }
 
     if ((mode === "auto" || mode === "sanitizer") && enableSan) {
         const probe = probeSanitizers(compiler, standard);
@@ -382,15 +376,33 @@ function buildPlan(source, output, compiler) {
 function parseLocation(line) {
     // GCC diagnostics: C:\\path\\main.cpp:37:12: error: ...
     let m = line.match(/^(.*?\.cpp):(\d+):(\d+):\s*(error|warning|note):\s*(.*)$/i);
-    if (m) return { file: m[1], line: Number(m[2]), column: Number(m[3]), message: `${m[4]}: ${m[5]}` };
+    if (m) {
+        const severity =
+            m[4].toLowerCase() === "warning" ? vscode.DiagnosticSeverity.Warning : vscode.DiagnosticSeverity.Error;
+        return {
+            file: m[1],
+            line: Number(m[2]),
+            column: Number(m[3]),
+            message: `${m[4]}: ${m[5]}`,
+            severity,
+            rule: m[4].toLowerCase() === "warning" ? "CP-COMPILE-WARNING" : "CP-COMPILE-ERROR",
+        };
+    }
 
     // GCC/ASan stack frames often contain: ... main.cpp:37:12 ...
     m = line.match(/((?:[A-Za-z]:[\\/])?[^\s()]+\.cpp):(\d+)(?::(\d+))?/i);
     if (m) {
-        const kind = /warning|runtime error|AddressSanitizer|UndefinedBehaviorSanitizer|ubsan/i.test(line)
-            ? vscode.DiagnosticSeverity.Error
-            : null;
-        if (kind !== null) return { file: m[1], line: Number(m[2]), column: Number(m[3] || 1), message: line.trim() };
+        const sanitizer = /AddressSanitizer|UndefinedBehaviorSanitizer|ubsan|runtime error/i.test(line);
+        if (sanitizer) {
+            return {
+                file: m[1],
+                line: Number(m[2]),
+                column: Number(m[3] || 1),
+                message: line.trim(),
+                severity: vscode.DiagnosticSeverity.Error,
+                rule: "CP-RUNTIME-SANITIZER",
+            };
+        }
     }
     return null;
 }
@@ -406,7 +418,13 @@ function parseDiagnostics(raw, defaultFile) {
             /(AddressSanitizer[^\n]*|runtime error:[^\n]*|UndefinedBehaviorSanitizer[^\n]*)/i,
         );
         if (sanitizerSummary)
-            result.push({ file: defaultFile, line: 1, column: 1, message: sanitizerSummary[1].trim() });
+            result.push({
+                file: defaultFile,
+                line: 1,
+                column: 1,
+                message: sanitizerSummary[1].trim(),
+                rule: "CP-RUNTIME-SANITIZER",
+            });
     }
     return dedupeDiagnostics(result);
 }
@@ -414,7 +432,7 @@ function parseDiagnostics(raw, defaultFile) {
 function dedupeDiagnostics(list) {
     const seen = new Set();
     return list.filter((d) => {
-        const key = `${d.file}|${d.line}|${d.column}|${d.message}`;
+        const key = `${d.rule || ""}|${d.file}|${d.line}|${d.column}|${d.message}`;
         if (seen.has(key)) return false;
         seen.add(key);
         return true;
@@ -440,6 +458,7 @@ function publishDiagnostics(source, diagnostics, severity = vscode.DiagnosticSev
         const col = Math.max(0, Number(d.column || 1) - 1);
         const diag = new vscode.Diagnostic(new vscode.Range(line, col, line, col + 1), d.message, s);
         diag.source = DIAG_SOURCE;
+        diag.code = d.rule || "CP-RUNTIME";
         arr.push(diag);
         byFile.set(uri.toString(), arr);
     }
@@ -510,6 +529,11 @@ async function diagnose() {
             await editor.document.save();
         }
     }
+    const staticDiagnostics = analyzeStaticCpp(editor.document.getText()).diagnostics.map((diagnostic) => ({
+        ...diagnostic,
+        file: source,
+        severity: vscode.DiagnosticSeverity.Warning,
+    }));
 
     const standard = config().get("cxxStandard", "gnu++23");
     const compilerVersion = getCompilerVersion(compiler);
@@ -545,8 +569,17 @@ async function diagnose() {
         publishDiagnostics(
             source,
             diagnostics.length
-                ? diagnostics
-                : [{ file: source, line: 1, column: 1, message: compileRaw || "g++のコンパイルに失敗しました。" }],
+                ? [...staticDiagnostics, ...diagnostics]
+                : [
+                      ...staticDiagnostics,
+                      {
+                          file: source,
+                          line: 1,
+                          column: 1,
+                          message: compileRaw || "g++のコンパイルに失敗しました。",
+                          rule: "CP-COMPILE-ERROR",
+                      },
+                  ],
         );
         outputChannel.appendLine("--- compile ---");
         outputChannel.appendLine(compileRaw);
@@ -565,31 +598,39 @@ async function diagnose() {
     const diagnostics = parseDiagnostics(raw, source);
 
     if (result.timedOut) {
-        publishDiagnostics(source, [
-            {
-                file: source,
-                line: 1,
-                column: 1,
-                message: `実行がタイムアウトしました (${timeout} ms)`,
-                severity: vscode.DiagnosticSeverity.Warning,
-            },
-        ]);
+        publishDiagnostics(
+            source,
+            [
+                {
+                    file: source,
+                    line: 1,
+                    column: 1,
+                    message: `実行がタイムアウトしました (${timeout} ms)`,
+                    severity: vscode.DiagnosticSeverity.Warning,
+                    rule: "CP-RUNTIME-TIMEOUT",
+                },
+            ].concat(staticDiagnostics),
+        );
     } else if (result.code !== 0) {
         publishDiagnostics(
             source,
-            diagnostics.length
-                ? diagnostics
-                : [
-                      {
-                          file: source,
-                          line: 1,
-                          column: 1,
-                          message: `Runtime Error: exit code ${result.code}\n${result.stderr || ""}`,
-                      },
-                  ],
+            staticDiagnostics.concat(
+                diagnostics.length
+                    ? diagnostics
+                    : [
+                          {
+                              file: source,
+                              line: 1,
+                              column: 1,
+                              message: `Runtime Error: exit code ${result.code}\n${result.stderr || ""}`,
+                              rule: "CP-RUNTIME-EXIT",
+                          },
+                      ],
+            ),
         );
     } else {
-        diagnosticCollection.clear();
+        if (staticDiagnostics.length) publishDiagnostics(source, staticDiagnostics);
+        else diagnosticCollection.clear();
     }
 
     outputChannel.appendLine(`Input: ${input.path ? input.path : "stdin (empty)"}`);

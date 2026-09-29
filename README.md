@@ -2,20 +2,27 @@
 
 LLMを使わず、ローカルのGCCと決定論的なソース変換・実行時チェックだけで競プロのデバッグを支援するVS Code拡張です。
 
-[最新リリース](https://github.com/anchu1024/cp-debugger/releases/tag/v0.2.6)の使用が推奨されています。
+[最新リリース](https://github.com/anchu1024/cp-debugger/releases/tag/v0.3.0)の使用が推奨されています。
 
-## 0.2.6
+## 0.3.0
 
-今回の重要な修正は、**GCCのSanitizer対応判定を `-print-file-name` だけで判断しない**ことです。
-実際に小さなC++プログラムを `g++ -fsanitize=address,undefined` でコンパイル・リンクし、さらに起動できることまで確認してからSanitizerを有効化します。
+今回はデバッグ用の出力関数がより多くの型(`string`, `pair`, `tuple`など)に対応しました。
 
-したがって、MinGWで `libasan.a` / `libubsan.a` が存在しない環境では、コマンドに `-fsanitize=...` を付けません。clang++への切り替えも行いません。
+デバッグ実行の保守性が高まりました。
+
+静的解析の一つである、入力受け取り忘れを実装しました。限定的なものですが、ユーザーが入力受け取り忘れの変数を使うのを防ぐことができます。
 
 ## Commands
 
 - `Ctrl+Alt+D`: カーソル位置の変数/式へデバッグ出力を追加
 - `Ctrl+Alt+C`: CP Debuggerが生成したデバッグ出力を削除
 - `Ctrl+Alt+R`: GCC-firstでコンパイル・実行・診断
+
+Debug Printはスカラー、`string`、`pair`、`tuple`、および反復可能なコンテナを共通formatterで出力します。生成コードは `CPDBG-BEGIN/END` マーカーで管理され、ユーザー自身の `cerr` は削除しません。
+
+## Static diagnostics
+
+診断時はtokenizeとscope/symbol情報を使い、初期化前に読み取られる可能性のあるローカル整数を `CP001` としてProblemsへ表示します。各診断にはrule IDが付きます。誤警告を抑えるため、確実に判断できないケースは警告しません。
 
 ## Compiler
 
