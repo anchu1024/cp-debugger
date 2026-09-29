@@ -2,7 +2,7 @@
     "name": "cp-debugger",
     "displayName": "Competitive Debugger",
     "description": "LLM-free competitive programming debugger for C++: GCC-first execution, debug-print instrumentation, sanitizer probing and source diagnostics.",
-    "version": "0.4.1",
+    "version": "0.4.2",
     "publisher": "cp-debugger-local",
     "license": "MIT",
     "repository": {
