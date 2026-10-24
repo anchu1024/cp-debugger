@@ -22,7 +22,7 @@
     ],
     "main": "./extension.js",
     "scripts": {
-        "package": "npx --yes @vscode/vsce@3.6.0 package",
+        "package": "npx --yes @vscode/vsce@4.0.0 package",
         "test": "node test/smoke.js"
     },
     "contributes": {
